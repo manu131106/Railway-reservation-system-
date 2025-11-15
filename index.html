@@ -1,0 +1,716 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Indian Railways — IRCTC Booking</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+  <style>
+    html { scroll-behavior: smooth; }
+    .seat { width:36px; height:36px; display:inline-flex; align-items:center; justify-content:center; border-radius:6px; cursor:pointer; font-size: 11px; font-weight: 600; }
+    .seat.available { background: white; border: 2px solid #e5e7eb; color: #1f2937; }
+    .seat.available:hover { background: #dbeafe; border-color: #3b82f6; }
+    .seat.selected { background: #10b981; color: white; border: 2px solid #059669; }
+    .seat.occupied { background: #d1d5db; color: #6b7280; border: 2px solid #9ca3af; cursor: not-allowed; }
+    body { background: linear-gradient(135deg, #f0f4f8 0%, #ffffff 100%); }
+    .irctc-blue { background: linear-gradient(135deg, #003f87 0%, #0052a3 100%); }
+    .nav-link { color: white; font-weight: 500; font-size: 14px; }
+    .nav-link:hover { opacity: 0.8; }
+    .search-section { background: linear-gradient(135deg, #bae6fd 0%, #e0f2fe 100%); }
+    .form-input { border: 2px solid #e5e7eb; border-radius: 8px; padding: 12px; font-size: 14px; }
+    .form-input:focus { outline: none; border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1); }
+    .btn-search { background: linear-gradient(135deg, #f97316 0%, #ea580c 100%); color: white; font-weight: 600; border-radius: 8px; padding: 12px 24px; cursor: pointer; transition: all 0.3s; }
+    .btn-search:hover { transform: translateY(-2px); box-shadow: 0 10px 25px rgba(249, 115, 22, 0.3); }
+    .train-card { background: white; border-radius: 12px; padding: 16px; border: 1px solid #e5e7eb; transition: all 0.3s; }
+    .train-card:hover { box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1); transform: translateY(-2px); }
+    .btn-select { background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; font-weight: 600; border-radius: 8px; padding: 10px 16px; }
+    .btn-select:hover { transform: translateY(-2px); }
+    .checkbox-custom { width: 20px; height: 20px; cursor: pointer; accent-color: #003f87; }
+    .tab-button { color: #003f87; font-weight: 600; border-bottom: 3px solid transparent; padding-bottom: 8px; cursor: pointer; }
+    .tab-button.active { color: #003f87; border-bottom-color: #f97316; }
+  </style>
+</head>
+<body class="text-gray-800">
+  <div id="root" class="min-h-screen"></div>
+
+  <!-- React -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <script type="text/babel">
+  const { useState, useEffect } = React;
+
+  /***********************
+   * Utilities
+   ***********************/
+  function randInt(a,b){ return Math.floor(Math.random()*(b-a+1))+a; }
+  function makePNR(){
+    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    let s="";
+    for(let i=0;i<10;i++) s+=chars[Math.floor(Math.random()*chars.length)];
+    return s;
+  }
+  function formatDateInput(d){ // yyyy-mm-dd -> readable
+    if(!d) return '';
+    const dt = new Date(d + 'T00:00:00');
+    return dt.toLocaleDateString();
+  }
+
+  /***********************
+   * Sample trains DB (mock)
+   ***********************/
+  const SAMPLE_TRAINS = [
+    { id:'T101', name:'Express One', from:'Pune', to:'Mumbai', depart:'06:30', arrive:'10:15', duration:'3h 45m', classes: [{code:'1A', price:1500},{code:'2A',price:900},{code:'SL',price:300}] },
+    { id:'T102', name:'Coastal Mail', from:'Pune', to:'Mumbai', depart:'09:15', arrive:'13:10', duration:'3h 55m', classes: [{code:'2A',price:950},{code:'3A',price:600},{code:'SL',price:320}] },
+    { id:'T201', name:'InterCity', from:'Pune', to:'Mumbai', depart:'14:00', arrive:'17:00', duration:'3h 0m', classes:[{code:'CC',price:400},{code:'SL',price:280}] },
+    { id:'T301', name:'Night Star', from:'Mumbai', to:'Pune', depart:'22:10', arrive:'02:30', duration:'4h 20m', classes:[{code:'1A',price:1600},{code:'2A',price:950},{code:'SL',price:310}] }
+  ];
+
+  /***********************
+   * LocalStorage helpers
+   ***********************/
+  function loadBookings() {
+    try { return JSON.parse(localStorage.getItem('rail_bookings') || '[]'); } catch(e){ return []; }
+  }
+  function saveBooking(b) {
+    const arr = loadBookings();
+    arr.unshift(b);
+    localStorage.setItem('rail_bookings', JSON.stringify(arr));
+  }
+  function loadUsers(){ try { return JSON.parse(localStorage.getItem('rail_users')||'[]'); } catch(e){ return [] } }
+  function saveUser(u){
+    const arr = loadUsers();
+    arr.unshift(u);
+    localStorage.setItem('rail_users', JSON.stringify(arr));
+  }
+
+  /***********************
+   * Components
+   ***********************/
+  function Header({onOpenLogin, onOpenRegister, user, onNavigate}) {
+    return (
+      <header className="irctc-blue shadow-lg">
+        {/* Top bar */}
+        <div className="bg-opacity-10 bg-black border-b border-white/20">
+          <div className="max-w-7xl mx-auto px-6 py-2 flex items-center justify-between text-white text-sm">
+            <div className="flex items-center gap-6">
+              <button onClick={onOpenLogin} className="nav-link">LOGIN</button>
+              <button onClick={onOpenRegister} className="nav-link">REGISTER</button>
+              <button className="nav-link">AGENT LOGIN</button>
+              <button className="nav-link">CONTACT US</button>
+              <button className="nav-link">HELP & SUPPORT</button>
+              <button className="nav-link text-red-400">DAILY DEALS</button>
+              <button className="nav-link font-bold">ALERTS</button>
+            </div>
+            <div className="flex items-center gap-4 text-xs">
+              <span>14-Nov-2025 [11:50:29]</span>
+              <span className="cursor-pointer hover:text-yellow-300">A-</span>
+              <span className="cursor-pointer hover:text-yellow-300">A</span>
+              <span className="cursor-pointer hover:text-yellow-300">A+</span>
+              <span className="cursor-pointer hover:text-yellow-300">हिंदी</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Main nav bar */}
+        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-8">
+            <div className="flex items-center gap-2">
+              <i className="fas fa-home text-white text-xl"></i>
+            </div>
+            <nav className="flex items-center gap-6">
+              <button className="nav-link bg-blue-900 px-4 py-2 rounded">IRCTC EXCLUSIVE</button>
+              <button onClick={()=>onNavigate('search')} className="nav-link text-orange-400 font-bold text-lg">TRAINS</button>
+              <button className="nav-link">LOYALTY</button>
+              <button className="nav-link">IRCTC eWallet</button>
+              <button className="nav-link">BUSES</button>
+              <button className="nav-link">FLIGHTS</button>
+              <button className="nav-link">HOTELS</button>
+              <button className="nav-link">HOLIDAYS</button>
+              <button className="nav-link">MEALS</button>
+              <button className="nav-link">PROMOTIONS</button>
+              <button className="nav-link">MORE</button>
+            </nav>
+          </div>
+          <div className="text-white text-2xl font-bold">
+            <span>🚆 IR</span>
+          </div>
+        </div>
+      </header>
+    );
+  }
+
+  function Home() {
+    return (
+      <section className="search-section py-12">
+        <div className="max-w-7xl mx-auto px-6">
+          <div className="grid md:grid-cols-2 gap-8">
+            {/* Left side - Search form */}
+            <div className="space-y-4">
+              <div className="flex gap-2 mb-4">
+                <button className="tab-button active"><i className="fas fa-check"></i> PNR STATUS</button>
+                <button className="tab-button"><i className="fas fa-chart-bar"></i> CHARTS / VACANCY</button>
+              </div>
+
+              <div className="bg-white rounded-lg p-6 shadow-lg">
+                <h2 className="text-3xl font-bold text-blue-900 mb-6">BOOK TICKET</h2>
+
+                <div className="space-y-4">
+                  {/* From */}
+                  <div>
+                    <label className="text-sm text-gray-600"><i className="fas fa-location-arrow"></i> From</label>
+                    <input placeholder="Enter station" className="form-input w-full mt-2" />
+                  </div>
+
+                  {/* Swap button */}
+                  <div className="flex justify-center">
+                    <button className="text-2xl text-gray-600 hover:text-blue-900">⇅</button>
+                  </div>
+
+                  {/* To */}
+                  <div>
+                    <label className="text-sm text-gray-600"><i className="fas fa-map-marker-alt"></i> To</label>
+                    <input placeholder="Enter station" className="form-input w-full mt-2" />
+                  </div>
+
+                  {/* Date */}
+                  <div>
+                    <label className="text-sm text-gray-600"><i className="fas fa-calendar-alt"></i> DD/MM/YYYY *</label>
+                    <input type="date" className="form-input w-full mt-2" />
+                  </div>
+
+                  {/* Class */}
+                  <div>
+                    <label className="text-sm text-gray-600"><i className="fas fa-chair"></i> Class</label>
+                    <select className="form-input w-full mt-2">
+                      <option>All Classes</option>
+                      <option>1A (AC First)</option>
+                      <option>2A (AC 2-Tier)</option>
+                      <option>3A (AC 3-Tier)</option>
+                      <option>SL (Sleeper)</option>
+                      <option>CC (Chair Car)</option>
+                    </select>
+                  </div>
+
+                  {/* Checkboxes */}
+                  <div className="space-y-2 py-2">
+                    <label className="flex items-center gap-2">
+                      <input type="checkbox" className="checkbox-custom" />
+                      <span className="text-sm">Person With Disability Concession</span>
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input type="checkbox" className="checkbox-custom" />
+                      <span className="text-sm">Train with Available Berth</span>
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input type="checkbox" className="checkbox-custom" />
+                      <span className="text-sm">Flexible With Date</span>
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input type="checkbox" className="checkbox-custom" />
+                      <span className="text-sm">Railway Pass Concession</span>
+                    </label>
+                  </div>
+
+                  {/* Buttons */}
+                  <div className="grid grid-cols-2 gap-3 pt-4">
+                    <button className="btn-search">Search</button>
+                    <button className="btn-search">Easy Booking on AskDISHA</button>
+                  </div>
+                </div>
+
+                {/* Footer info */}
+                <div className="mt-6 pt-4 border-t space-y-1 text-xs text-blue-600">
+                  <div className="font-semibold">Festival Round Trip Scheme: User Guide and Terms & Conditions</div>
+                  <div>Customers can use enhanced interface for their IRCTC related queries!! https://equery.irctc.co.in</div>
+                  <div className="text-gray-600">Customer Care Numbers: Dial 14646 (Within India); Call: +91-8044647999 / +91-8035734999(Outside India)</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Right side - Hero image */}
+            <div className="relative">
+              <div className="bg-gradient-to-br from-blue-100 to-blue-50 rounded-lg p-6 h-full flex flex-col items-center justify-center">
+                <h1 className="text-5xl font-bold text-blue-900 text-center mb-4">INDIAN RAILWAYS</h1>
+                <div className="flex gap-8 text-blue-900 font-semibold mb-8">
+                  <span>Safety</span>
+                  <span>Security</span>
+                  <span>Punctuality</span>
+                </div>
+                <div className="text-center space-y-2">
+                  <div className="text-6xl">🚆</div>
+                  <p className="text-gray-700 max-w-md">Experience world-class rail journey with comfort, safety and reliability</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  function Search({onSelectTrain}) {
+    const [from, setFrom] = useState('Pune');
+    const [to, setTo] = useState('Mumbai');
+    const [date, setDate] = useState('');
+    const [results, setResults] = useState([]);
+
+    function search(){
+      // simple filter: match from & to (ignores date, but we show date)
+      const res = SAMPLE_TRAINS.filter(t => t.from.toLowerCase()===from.toLowerCase() && t.to.toLowerCase()===to.toLowerCase());
+      // attach random availability snapshot (simulate seat occupancy)
+      const withAvail = res.map(t => {
+        const classes = t.classes.map(c => ({...c, available: randInt(5,80)}));
+        return {...t, classes};
+      });
+      setResults(withAvail);
+    }
+
+    useEffect(()=>{ search(); }, []);
+
+    return (
+      <section className="search-section min-h-screen py-12">
+        <div className="max-w-7xl mx-auto px-6">
+          {/* Search bar */}
+          <div className="bg-white p-6 rounded-lg shadow-lg mb-8">
+            <div className="grid md:grid-cols-5 gap-3 items-end">
+              <div>
+                <label className="text-xs text-gray-600 font-semibold"><i className="fas fa-location-arrow"></i> From</label>
+                <input value={from} onChange={e=>setFrom(e.target.value)} className="form-input w-full mt-2" />
+              </div>
+              <div>
+                <label className="text-xs text-gray-600 font-semibold"><i className="fas fa-map-marker-alt"></i> To</label>
+                <input value={to} onChange={e=>setTo(e.target.value)} className="form-input w-full mt-2" />
+              </div>
+              <div>
+                <label className="text-xs text-gray-600 font-semibold"><i className="fas fa-calendar-alt"></i> Date</label>
+                <input value={date} onChange={e=>setDate(e.target.value)} type="date" className="form-input w-full mt-2" />
+              </div>
+              <div>
+                <label className="text-xs text-gray-600 font-semibold"><i className="fas fa-chair"></i> Class</label>
+                <select className="form-input w-full mt-2">
+                  <option>All Classes</option>
+                  <option>1A</option>
+                  <option>2A</option>
+                  <option>3A</option>
+                  <option>SL</option>
+                </select>
+              </div>
+              <div>
+                <button onClick={search} className="btn-search w-full">Search</button>
+              </div>
+            </div>
+          </div>
+
+          {/* Results */}
+          <div className="space-y-3">
+            {results.length===0 && <div className="bg-white p-6 rounded-lg shadow text-gray-600 text-center">No trains found for this route.</div>}
+            {results.map((t) => (
+              <div key={t.id} className="train-card">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1">
+                    <div className="flex items-baseline gap-3 mb-2">
+                      <div className="font-bold text-lg text-blue-900">{t.name}</div>
+                      <div className="text-xs text-gray-500 font-mono">{t.id}</div>
+                    </div>
+                    <div className="text-sm text-gray-700 mb-3">
+                      <span className="font-semibold">{t.from}</span> → <span className="font-semibold">{t.to}</span>
+                      <span className="text-gray-500"> • {t.depart} - {t.arrive} • {t.duration}</span>
+                    </div>
+                    <div className="flex gap-2 flex-wrap">
+                      {t.classes.map(c => (
+                        <div key={c.code} className="text-xs px-3 py-1 bg-blue-50 border border-blue-200 rounded text-blue-900 font-semibold">
+                          {c.code} <span className="text-orange-600">₹{c.price}</span> • Avl {c.available}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-2 items-end">
+                    <button onClick={()=>onSelectTrain({...t, date})} className="btn-select">Select Seats</button>
+                    <button className="px-3 py-2 rounded border text-sm text-gray-600 hover:bg-gray-50">View Details</button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  function SeatMapModal({train, onClose, onBook, user}) {
+    // simple seat map: 6 columns (A-F) x 10 rows = 60 seats
+    const cols = ['A','B','C','D','E','F'];
+    const rows = Array.from({length:10},(_,i)=>i+1);
+    const totalSeats = cols.length * rows.length;
+    const [occupied, setOccupied] = useState(new Set()); // occupied by others
+    const [selected, setSelected] = useState([]);
+    const [seatClass, setSeatClass] = useState(train.classes[0]?.code || '');
+
+    useEffect(()=>{
+      // simulate random occupied seats for this train/date/class
+      const occ = new Set();
+      const initial = randInt(4,18);
+      while(occ.size < initial) occ.add(randInt(1,totalSeats));
+      setOccupied(occ);
+      setSelected([]);
+    }, [train]);
+
+    function seatId(r,cIdx){ return `${r}${cols[cIdx]}`; }
+    function seatIndex(r,cIdx){ return (r-1)*cols.length + cIdx + 1; }
+
+    function toggleSeat(r,cIdx){
+      const idx = seatIndex(r,cIdx);
+      if(occupied.has(idx)) return;
+      if(selected.includes(idx)){
+        setSelected(s=>s.filter(x=>x!==idx));
+      } else {
+        setSelected(s=> [...s, idx].slice(-6)); // limit max 6 seats per booking
+      }
+    }
+
+    function doBook(){
+      if(selected.length===0){ alert('Select at least one seat'); return; }
+      if(!user){ alert('Please login/register to book'); return; }
+      // Build passenger list (dummy): prompt names quickly
+      const passengers = selected.map((seatIdx,i)=>({
+        name: prompt(`Passenger ${i+1} name`, user.name || `Passenger${i+1}`) || `Passenger${i+1}`,
+        age: prompt(`Passenger ${i+1} age`, '25') || '25',
+        seat: (() => {
+          // convert seatIdx to r & col
+          const r = Math.ceil(seatIdx / cols.length);
+          const cIdx = (seatIdx - 1) % cols.length;
+          return seatId(r,cIdx);
+        })()
+      }));
+
+      const costPer = train.classes.find(c=>c.code===seatClass)?.price || train.classes[0].price;
+      const totalFare = costPer * passengers.length;
+
+      const pnr = makePNR();
+      const booking = {
+        pnr, trainId: train.id, trainName: train.name, from: train.from, to: train.to,
+        date: train.date || train.journeyDate || '', class: seatClass, passengers, totalFare, createdAt: new Date().toISOString()
+      };
+      // mark those seats as occupied locally (simulate)
+      const newOcc = new Set(occupied);
+      selected.forEach(s=>newOcc.add(s));
+      setOccupied(newOcc);
+      setSelected([]);
+      onBook(booking);
+      onClose();
+    }
+
+    const costPer = train.classes.find(c=>c.code===seatClass)?.price || train.classes[0].price;
+    const totalFare = costPer * selected.length;
+
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+        <div className="relative w-full max-w-3xl bg-white rounded-xl p-8 shadow-2xl overflow-auto" style={{maxHeight:'90vh'}}>
+          <div className="flex items-start justify-between gap-4 mb-6">
+            <div>
+              <div className="font-bold text-2xl text-blue-900">{train.name} ({train.id})</div>
+              <div className="text-sm text-gray-600 mt-1">{train.from} → {train.to} • {train.depart} - {train.arrive}</div>
+              <div className="text-xs text-gray-500 mt-1">Date: {formatDateInput(train.date)}</div>
+            </div>
+            <div className="text-right">
+              <div className="text-sm font-semibold text-gray-700">Select Class</div>
+              <select value={seatClass} onChange={e=>setSeatClass(e.target.value)} className="form-input mt-2">
+                {train.classes.map(c=> <option key={c.code} value={c.code}>{c.code} — ₹{c.price}</option>)}
+              </select>
+            </div>
+          </div>
+
+          {/* Seat map */}
+          <div className="bg-blue-50 p-6 rounded-lg mb-6">
+            <div className="text-sm text-gray-600 mb-4 font-semibold">Click seats to select (max 6):</div>
+            
+            <div className="inline-grid gap-2" style={{gridTemplateColumns: 'repeat(6, 1fr)'}}>
+              {/* Column headers */}
+              {cols.map((col, idx) => (
+                <div key={`header-${idx}`} className="text-center font-bold text-blue-900 h-8 flex items-center justify-center">
+                  {col}
+                </div>
+              ))}
+              
+              {/* Seats */}
+              {rows.map(r => 
+                cols.map((c, cIdx) => {
+                  const idx = seatIndex(r,cIdx);
+                  const sId = seatId(r,cIdx);
+                  const isOcc = occupied.has(idx);
+                  const isSel = selected.includes(idx);
+                  return (
+                    <div key={sId}
+                      onClick={()=>toggleSeat(r,cIdx)}
+                      title={sId}
+                      className={`seat ${isOcc ? 'occupied' : isSel ? 'selected' : 'available'}`}
+                    >
+                      {sId}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="flex gap-6 mt-6 text-xs">
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 rounded border-2 border-green-500 bg-green-500"></div>
+                <span>Selected</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 rounded border-2 border-gray-400 bg-white"></div>
+                <span>Available</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 rounded border-2 border-gray-400 bg-gray-300"></div>
+                <span>Occupied</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Summary */}
+          <div className="bg-gray-50 p-4 rounded-lg mb-6 grid grid-cols-3 gap-4">
+            <div>
+              <div className="text-xs text-gray-600">Seats Selected</div>
+              <div className="text-2xl font-bold text-blue-900">{selected.length}</div>
+            </div>
+            <div>
+              <div className="text-xs text-gray-600">Class</div>
+              <div className="text-lg font-semibold text-blue-900">{seatClass}</div>
+            </div>
+            <div>
+              <div className="text-xs text-gray-600">Total Fare</div>
+              <div className="text-2xl font-bold text-orange-600">₹{totalFare}</div>
+            </div>
+          </div>
+
+          {/* Buttons */}
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-sm text-gray-600">
+              {selected.length > 0 && <span className="font-semibold">Seats: {selected.sort((a,b)=>a-b).join(', ')}</span>}
+            </div>
+            <div className="flex gap-3">
+              <button onClick={onClose} className="px-6 py-2 rounded border text-gray-700 hover:bg-gray-50">Cancel</button>
+              <button onClick={doBook} className="btn-search px-6 py-2">
+                Book Now {selected.length>0 && `(${selected.length})`}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function Profile({user}) {
+    const [bookings, setBookings] = useState([]);
+    useEffect(()=> setBookings(loadBookings()), []);
+    return (
+      <section className="search-section min-h-screen py-12">
+        <div className="max-w-7xl mx-auto px-6">
+          <div className="bg-white p-8 rounded-lg shadow-lg">
+            <div className="flex items-center justify-between mb-8">
+              <div>
+                <h2 className="text-3xl font-bold text-blue-900">My Bookings</h2>
+                <p className="text-sm text-gray-600 mt-1">Saved in your browser (demo)</p>
+              </div>
+              <div className="text-right">
+                <div className="text-sm text-gray-600">Logged in as</div>
+                <div className="text-lg font-semibold text-blue-900">{user?.name || 'Guest'}</div>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              {bookings.length===0 && (
+                <div className="text-center py-12">
+                  <i className="fas fa-ticket-alt text-4xl text-gray-300 mb-3"></i>
+                  <p className="text-gray-500">You have no bookings yet.</p>
+                  <p className="text-sm text-gray-400 mt-1">Search and book trains to see them here</p>
+                </div>
+              )}
+              {bookings.map(b => (
+                <div key={b.pnr} className="train-card">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-2">
+                        <div className="text-lg font-bold text-blue-900">{b.trainName}</div>
+                        <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded">Confirmed</span>
+                      </div>
+                      <div className="text-sm text-gray-600 mb-3">
+                        <span className="font-semibold">{b.from}</span> → <span className="font-semibold">{b.to}</span>
+                        <span className="text-gray-500"> • {formatDateInput(b.date)}</span>
+                      </div>
+                      <div className="grid grid-cols-4 gap-4 text-xs">
+                        <div>
+                          <div className="text-gray-600">PNR</div>
+                          <div className="font-mono font-bold text-blue-900">{b.pnr}</div>
+                        </div>
+                        <div>
+                          <div className="text-gray-600">Class</div>
+                          <div className="font-semibold text-blue-900">{b.class}</div>
+                        </div>
+                        <div>
+                          <div className="text-gray-600">Seats</div>
+                          <div className="font-semibold text-blue-900">{b.passengers.map(p=>p.seat).join(', ')}</div>
+                        </div>
+                        <div>
+                          <div className="text-gray-600">Fare</div>
+                          <div className="font-bold text-orange-600">₹{b.totalFare}</div>
+                        </div>
+                      </div>
+                      <div className="text-xs text-gray-500 mt-3 pt-3 border-t">
+                        <strong>Passengers:</strong> {b.passengers.map(p=>`${p.name} (${p.age})`).join(', ')}
+                      </div>
+                    </div>
+                    <div className="flex flex-col gap-2">
+                      <button onClick={()=>{ navigator.clipboard?.writeText(b.pnr); alert('PNR copied') }} className="px-4 py-2 rounded bg-blue-50 text-blue-900 text-sm font-semibold hover:bg-blue-100">
+                        <i className="fas fa-copy"></i> Copy PNR
+                      </button>
+                      <button onClick={()=>{
+                        if(confirm('Cancel booking?')){
+                          const all = loadBookings().filter(x=>x.pnr!==b.pnr);
+                          localStorage.setItem('rail_bookings', JSON.stringify(all));
+                          setBookings(all);
+                        }
+                      }} className="px-4 py-2 rounded border border-red-300 text-red-600 text-sm hover:bg-red-50">
+                        <i className="fas fa-trash"></i> Cancel
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+    );
+  }
+
+  function LoginRegisterModal({type,onClose,onLogin}) {
+    const [name,setName]=useState(''); const [email,setEmail]=useState(''); const [pass,setPass]=useState('');
+
+    function doRegister(e){
+      e.preventDefault();
+      if(!name||!email||!pass) { alert('Fill all fields'); return; }
+      // store user locally
+      saveUser({name,email,pass,createdAt: new Date().toISOString()});
+      localStorage.setItem('rail_session', JSON.stringify({name,email}));
+      onLogin({name,email});
+      onClose();
+    }
+    function doLogin(e){
+      e.preventDefault();
+      const users = loadUsers();
+      const found = users.find(u=>u.email===email && u.pass===pass);
+      if(!found){ alert('Invalid credentials (demo)'); return; }
+      localStorage.setItem('rail_session', JSON.stringify({name: found.name, email: found.email}));
+      onLogin({name: found.name, email: found.email});
+      onClose();
+    }
+
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+        <div className="relative w-full max-w-md p-8 bg-white rounded-lg shadow-2xl">
+          <div className="flex justify-between items-start mb-6">
+            <div>
+              <h3 className="text-2xl font-bold text-blue-900">{type==='login' ? 'Login' : 'Register'}</h3>
+              <p className="text-xs text-gray-500 mt-1">{type==='login' ? 'Enter your credentials' : 'Create a demo account'}</p>
+            </div>
+            <button onClick={onClose} className="text-2xl text-gray-400 hover:text-gray-600">✕</button>
+          </div>
+
+          <form onSubmit={type==='login' ? doLogin : doRegister} className="space-y-4">
+            {type==='register' && (
+              <div>
+                <label className="text-sm text-gray-600 font-semibold">Full Name</label>
+                <input placeholder="Enter your name" value={name} onChange={e=>setName(e.target.value)} className="form-input w-full mt-2" required />
+              </div>
+            )}
+            <div>
+              <label className="text-sm text-gray-600 font-semibold">Email</label>
+              <input placeholder="your@email.com" value={email} onChange={e=>setEmail(e.target.value)} className="form-input w-full mt-2" type="email" required />
+            </div>
+            <div>
+              <label className="text-sm text-gray-600 font-semibold">Password</label>
+              <input placeholder="••••••••" value={pass} onChange={e=>setPass(e.target.value)} className="form-input w-full mt-2" type="password" required />
+            </div>
+            <div className="flex items-center gap-2 pt-4">
+              <button type="submit" className="btn-search flex-1">{type==='login'?'Login':'Register'}</button>
+              <button type="button" onClick={onClose} className="px-4 py-2 rounded border text-gray-700 hover:bg-gray-50">Cancel</button>
+            </div>
+          </form>
+
+          <div className="text-xs text-center text-gray-500 mt-4">
+            {type==='login' ? 'Demo mode - Use any email/password to login' : 'Demo mode - Account saved locally'}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  /***********************
+   * Root App
+   ***********************/
+  function App(){
+    const [page, setPage] = useState('home'); // home, search, profile
+    const [trainToBook, setTrainToBook] = useState(null);
+    const [showSeatModal, setShowSeatModal] = useState(false);
+    const [user, setUser] = useState(null);
+    const [showAuth, setShowAuth] = useState(null); // 'login'|'register'|null
+
+    useEffect(()=>{
+      const sess = localStorage.getItem('rail_session');
+      if(sess) try { setUser(JSON.parse(sess)); } catch(e){}
+    }, []);
+
+    function handleSelectTrain(t){
+      setTrainToBook(t);
+      setShowSeatModal(true);
+    }
+
+    function handleBook(booking){
+      // persist and show confirmation
+      saveBooking(booking);
+      alert('✓ Booking Confirmed!\nPNR: ' + booking.pnr);
+      setPage('profile');
+    }
+
+    function handleLogin(u){
+      setUser(u);
+    }
+
+    return (
+      <div className="min-h-screen flex flex-col">
+        <Header onOpenLogin={()=>setShowAuth('login')} onOpenRegister={()=>setShowAuth('register')} user={user} onNavigate={setPage} />
+
+        <main className="flex-1">
+          {page==='home' && <Home />}
+          {page==='search' && <Search onSelectTrain={handleSelectTrain} />}
+          {page==='profile' && <Profile user={user} />}
+        </main>
+
+        {/* Seat modal */}
+        {showSeatModal && trainToBook && (
+          <SeatMapModal train={trainToBook} onClose={()=>setShowSeatModal(false)} onBook={handleBook} user={user} />
+        )}
+
+        {/* Auth modal */}
+        {showAuth && (
+          <LoginRegisterModal type={showAuth} onClose={()=>setShowAuth(null)} onLogin={handleLogin} />
+        )}
+
+        <footer className="bg-blue-900 text-white/80 py-6 mt-12">
+          <div className="max-w-7xl mx-auto px-6 text-center text-sm">
+            <p>This is a demo application for Indian Railways ticket booking</p>
+            <p className="mt-2 text-xs">All bookings are saved locally in your browser — Not for production use</p>
+          </div>
+        </footer>
+      </div>
+    );
+  }
+
+  // mount
+  const root = ReactDOM.createRoot(document.getElementById('root'));
+  root.render(<App />);
